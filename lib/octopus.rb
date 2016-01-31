@@ -28,6 +28,14 @@ module Octopus
     end
   end
 
+  def self.load_balancer=(balancer)
+    @load_balancer = balancer
+  end
+
+  def self.load_balancer
+    @load_balancer ||= Octopus::LoadBalancing::RoundRobin
+  end
+
   def self.master_shard
     ((config && config[:master_shard]) || :master).to_sym
   end
@@ -109,11 +117,11 @@ module Octopus
     ActiveRecord::Base.connection.initialize_shards(@config)
   end
 
-  def self.using(shard, &block)
+  def self.using(shard, options = {}, &block)
     conn = ActiveRecord::Base.connection
 
     if conn.is_a?(Octopus::Proxy)
-      conn.run_queries_on_shard(shard, &block)
+      conn.run_queries_on_shard(shard, options, &block)
     else
       yield
     end

@@ -11,7 +11,8 @@ module Octopus
       end
 
       # Returns the next available slave in the pool
-      def next
+      def next(options)
+        puts "got to next and options is #{options.inspect}"
         @slaves_list[@slave_index = (@slave_index + 1) % @slaves_list.length]
       end
     end

@@ -10,6 +10,7 @@ module Octopus
     CURRENT_SHARD_KEY = 'octopus.current_shard'.freeze
     CURRENT_GROUP_KEY = 'octopus.current_group'.freeze
     CURRENT_SLAVE_GROUP_KEY = 'octopus.current_slave_group'.freeze
+    CURRENT_OPTIONS_KEY = 'octopus.current_options'.freeze
     BLOCK_KEY = 'octopus.block'.freeze
     LAST_CURRENT_SHARD_KEY = 'octopus.last_current_shard'.freeze
     FULLY_REPLICATED_KEY = 'octopus.fully_replicated'.freeze
@@ -94,7 +95,7 @@ module Octopus
 
       @slaves_list = @shards.keys.map(&:to_s).sort
       @slaves_list.delete('master')
-      @slaves_load_balancer = Octopus::LoadBalancing::RoundRobin.new(@slaves_list)
+      @slaves_load_balancer = Octopus.load_balancer.new(@slaves_list)
     end
 
     def current_model
@@ -159,6 +160,14 @@ module Octopus
 
     def current_slave_group=(slave_group_symbol)
       Thread.current[CURRENT_SLAVE_GROUP_KEY] = slave_group_symbol
+    end
+
+    def current_options
+      Thread.current[CURRENT_OPTIONS_KEY]
+    end
+
+    def current_options=(options)
+      Thread.current[CURRENT_OPTIONS_KEY] = options
     end
 
     def block
@@ -228,9 +237,9 @@ module Octopus
       @adapters.size > 1
     end
 
-    def run_queries_on_shard(shard, &_block)
+    def run_queries_on_shard(shard, options={}, &_block)
       keeping_connection_proxy(shard) do
-        using_shard(shard) do
+        using_shard(shard, options) do
           yield
         end
       end
@@ -429,7 +438,7 @@ module Octopus
 
     def send_queries_to_selected_slave(method, *args, &block)
       if current_model.replicated || fully_replicated?
-        selected_slave = @slaves_load_balancer.next
+        selected_slave = @slaves_load_balancer.next current_options
       else
         selected_slave = Octopus.master_shard
       end
@@ -457,7 +466,7 @@ module Octopus
     # Temporarily switch `current_shard` to the next slave in a slave group and send queries to it
     # while preserving `current_shard`
     def send_queries_to_balancer(balancer, method, *args, &block)
-      send_queries_to_slave(balancer.next, method, *args, &block)
+      send_queries_to_slave(balancer.next(current_options), method, *args, &block)
     end
 
     # Temporarily switch `current_shard` to the specified slave and send queries to it
@@ -484,18 +493,21 @@ module Octopus
     end
 
     # Temporarily switch `current_shard` and run the block
-    def using_shard(shard, &_block)
+    def using_shard(shard, options = {}, &_block)
       older_shard = current_shard
       older_slave_group = current_slave_group
+      older_options = current_options
 
       begin
         unless current_model && !current_model.allowed_shard?(shard)
           self.current_shard = shard
+          self.current_options = options
         end
         yield
       ensure
         self.current_shard = older_shard
         self.current_slave_group = older_slave_group
+        self.current_options = older_options
       end
     end
 
